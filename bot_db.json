@@ -1,0 +1,176 @@
+{
+  "users": [
+    6908091275,
+    7056746440,
+    8136681487,
+    7032961484,
+    7066485347,
+    6744894085
+  ],
+  "blocked": [
+    6744894085
+  ],
+  "sessions": [
+    {
+      "phone": "+2349152268123",
+      "session_id": "sess_1777294152"
+    },
+    {
+      "phone": "+2349152262644",
+      "session_id": "sess_1777294182"
+    },
+    {
+      "phone": "+2349152261741",
+      "session_id": "sess_1777294205"
+    },
+    {
+      "phone": "+2349152265107",
+      "session_id": "sess_1777294224"
+    },
+    {
+      "phone": "+2348020285111",
+      "session_id": "sess_1777294241"
+    },
+    {
+      "phone": "+2348020286017",
+      "session_id": "s_1777317157"
+    },
+    {
+      "phone": "+2348020284391",
+      "session_id": "s_1777317181"
+    },
+    {
+      "phone": "+2348020284190",
+      "session_id": "s_1777317199"
+    },
+    {
+      "phone": "+2348020287006",
+      "session_id": "s_1777317219"
+    },
+    {
+      "phone": "+2348020286153",
+      "session_id": "s_1777317237"
+    },
+    {
+      "phone": "+2348020287647",
+      "session_id": "s_1777317256"
+    },
+    {
+      "phone": "+2348020287819",
+      "session_id": "s_1777317273"
+    },
+    {
+      "phone": "+2348020284744",
+      "session_id": "s_1777317290"
+    },
+    {
+      "phone": "+2348020281491",
+      "session_id": "s_1777317311"
+    },
+    {
+      "phone": "+2348020287068",
+      "session_id": "s_1777317329"
+    }
+  ],
+  "user_data": {
+    "6908091275": {
+      "points": 99999998849,
+      "total_tested": 976,
+      "healthy_found": 179,
+      "show_mode": "only_used",
+      "receive_mode": "text",
+      "name": "Ruku Vai"
+    },
+    "7056746440": {
+      "points": 0,
+      "total_tested": 10,
+      "healthy_found": 5,
+      "show_mode": "sort_by_order",
+      "receive_mode": "copy"
+    },
+    "8136681487": {
+      "points": 9783,
+      "total_tested": 2154,
+      "healthy_found": 292,
+      "show_mode": "only_used",
+      "receive_mode": "text",
+      "name": "Виталий"
+    },
+    "7032961484": {
+      "name": "Dina",
+      "points": 1811,
+      "total_tested": 540,
+      "healthy_found": 80,
+      "show_mode": "green_first",
+      "receive_mode": "copy"
+    },
+    "7066485347": {
+      "name": "—͞MAMUN",
+      "points": 491,
+      "total_tested": 519,
+      "healthy_found": 30,
+      "show_mode": "only_used",
+      "receive_mode": "copy"
+    },
+    "6744894085": {
+      "name": "kankon",
+      "points": 10,
+      "total_tested": 0,
+      "healthy_found": 0,
+      "show_mode": "sort_by_order",
+      "receive_mode": "copy"
+    }
+  },
+  "session_stats": {
+    "+2349152262644": {
+      "tested": 616
+    },
+    "+2349152261741": {
+      "tested": 661
+    },
+    "+2349152268123": {
+      "tested": 673
+    },
+    "+2349152265107": {
+      "tested": 642
+    },
+    "+2348020285111": {
+      "tested": 623
+    },
+    "+2348020286153": {
+      "tested": 14
+    },
+    "+2348020287068": {
+      "tested": 12
+    },
+    "+2348020284190": {
+      "tested": 14
+    },
+    "+2348020287647": {
+      "tested": 12
+    },
+    "+2348020287006": {
+      "tested": 14
+    },
+    "+2348020286017": {
+      "tested": 14
+    },
+    "+2348020284744": {
+      "tested": 12
+    },
+    "+2348020281491": {
+      "tested": 12
+    },
+    "+2348020287819": {
+      "tested": 12
+    },
+    "+2348020284391": {
+      "tested": 14
+    }
+  },
+  "config": {
+    "admin_id": 6908091275,
+    "support_id": "@rikton16",
+    "check_delay": 0.8
+  }
+}
