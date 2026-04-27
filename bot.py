@@ -157,18 +157,17 @@ async def check_number(phone, client, client_phone):
         flag = get_flag(phone); 
         c_contact = types.InputPhoneContact(client_id=random.randint(1, 999999), phone=phone, first_name="Check", last_name=str(time.time())[-4:])
         res_imp = await client(functions.contacts.ImportContactsRequest([c_contact]))
-        target_u = None
+        exists = False
+        is_ban = False
         if res_imp.users:
             for u_u in res_imp.users:
-                if getattr(u_u, 'phone', '') == phone.replace('+', ''): target_u = u_u; break
-        exists = target_u is not None
-        is_ban = False
-        if exists:
-            # If the user exists but is marked as deleted by Telegram, it is a BANNED/Purged number
-            if getattr(target_u, 'deleted', False):
-                is_ban = True
-                exists = False # Count it as banned, NOT a valid existing account for the summary
-            try: await client(functions.contacts.DeleteContactsRequest(id=[target_u.id]))
+                exists = True
+                if getattr(u_u, 'deleted', False):
+                    is_ban = True
+                    exists = False
+                if exists or is_ban: break
+            
+            try: await client(functions.contacts.DeleteContactsRequest(id=[u.id for u in res_imp.users]))
             except: pass
         
         update_session_stats(client_phone)
