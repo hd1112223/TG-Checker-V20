@@ -30,24 +30,35 @@ pending_notices = {}
 pending_recharges = {}
 
 def get_db():
+    default_db = {
+        "users": [], 
+        "blocked": [], 
+        "sessions": [], 
+        "user_data": {}, 
+        "session_stats": {}, 
+        "config": {"admin_id": DEFAULT_ADMIN, "support_id": "@rikton16", "check_delay": 0.5}
+    }
     if not os.path.exists(DB_FILE):
-        return {"users": [], "blocked": [], "sessions": [], "user_data": {}, "session_stats": {}, "config": {"admin_id": DEFAULT_ADMIN, "support_id": "@rikton16", "check_delay": 0.5}}
+        return default_db
     try:
         with open(DB_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f); 
+            data = json.load(f)
+            # Ensure essential keys exist
+            if not isinstance(data, dict): return default_db
             if "session_stats" not in data: data["session_stats"] = {}
             if "user_data" not in data: data["user_data"] = {}
-            if "config" not in data: data["config"] = {"admin_id": DEFAULT_ADMIN, "support_id": "@rikton16", "check_delay": 0.5}
+            if "config" not in data: data["config"] = default_db["config"]
+            if "check_delay" not in data["config"]: data["config"]["check_delay"] = 0.5
             return data
     except:
-        return {"users": [], "blocked": [], "sessions": [], "user_data": {}, "session_stats": {}, "config": {"admin_id": DEFAULT_ADMIN, "support_id": "@rikton16", "check_delay": 0.5}}
+        return default_db
 
 def save_db(data):
     with open(DB_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=2)
 
-def get_admin_id(): return get_db()["config"]["admin_id"]
-def get_support_id(): return get_db()["config"]["support_id"]
-def get_check_delay(): return get_db()["config"].get("check_delay", 0.5)
+def get_admin_id(): return get_db().get("config", {}).get("admin_id", DEFAULT_ADMIN)
+def get_support_id(): return get_db().get("config", {}).get("support_id", "@rikton16")
+def get_check_delay(): return get_db().get("config", {}).get("check_delay", 0.5)
 
 def get_user_stats(user_id, name="User"):
     db = get_db(); uid_s = str(user_id)
@@ -92,7 +103,7 @@ def normalize_number(phone):
 country_flags = {
     "+1": "🇺🇸", "+7": "🇷🇺", "+20": "🇪🇬", "+27": "🇿🇦", "+30": "🇬🇷", "+31": "🇳🇱", "+32": "🇧🇪", "+33": "🇫🇷",
     "+34": "🇪🇸", "+36": "🇭🇺", "+39": "🇮🇹", "+40": "🇷🇴", "+41": "🇨🇭", "+43": "🇦🇹", "+44": "🇬🇧", "+45": "🇩🇰",
-    "+46": "🇸🇪", "+47": "🇳🇴", "+48": "🇵🇱", "+49": "🇩🇪", "+51": "🇵🇪", "+52": "��🇽", "+53": "🇨🇺", "+54": "🇦🇷",
+    "+46": "🇸🇪", "+47": "🇳🇴", "+48": "🇵🇱", "+49": "🇩🇪", "+51": "🇵🇪", "+52": "🇲🇽", "+53": "🇨🇺", "+54": "🇦🇷",
     "+55": "🇧🇷", "+56": "🇨🇱", "+57": "🇨🇴", "+58": "🇻🇪", "+60": "🇲🇾", "+61": "🇦🇺", "+62": "🇮🇩", "+63": "🇵🇭",
     "+64": "🇳🇿", "+65": "🇸🇬", "+66": "🇹🇭", "+81": "🇯🇵", "+82": "🇰🇷", "+84": "🇻🇳", "+86": "🇨🇳", "+90": "🇹🇷",
     "+91": "🇮🇳", "+92": "🇵🇰", "+98": "🇮🇷", "+212": "🇲🇦", "+213": "🇩🇿", "+216": "🇹🇳", "+218": "🇱🇾", "+234": "🇳🇬",
@@ -131,8 +142,13 @@ async def admin_u_info(event, u_id):
     btns = [[Button.inline("💰 Recharge Points", f"uset_{u_id}_pts".encode()), Button.inline("🔄 Reset Balance", f"uset_{u_id}_rst".encode())],
             [Button.inline("🔓 Unblock User" if is_blk else "🚫 Block User", f"uset_{u_id}_{'unb' if is_blk else 'blk'}".encode())],
             [Button.inline("⬅️ Back to List", b"adm_users_0")]]
-    if hasattr(event, 'edit'): await event.edit(msg, buttons=btns)
-    else: await bot.send_message(get_admin_id(), msg, buttons=btns)
+    if hasattr(event, 'edit'):
+        try:
+            await event.edit(msg, buttons=btns)
+        except errors.MessageNotModifiedError:
+            pass
+    else:
+        await bot.send_message(get_admin_id(), msg, buttons=btns)
 
 # --- Logic ---
 
@@ -245,7 +261,7 @@ async def msg_handler(event):
         except: pass
         finally: users_in_conversation.discard(u_id); return
     
-    # Check Numbers
+    # Check Logic
     if text.startswith('/') or len(text) < 5: return
     if not user_clients: return await event.reply("⚠️ No Active Sessions.")
     nums = [normalize_number(l.strip()) for l in text.split('\n') if len(normalize_number(l.strip())) > 7]
@@ -260,7 +276,8 @@ async def msg_handler(event):
         if not avl: 
              await asyncio.sleep(2); now = time.time()
              if all(session_waits.get(p, 0) > now for p in user_clients):
-                  await st_msg.edit(f"⏳ Waiting for High Traffic...")
+                  try: await st_msg.edit(f"⏳ Waiting for High Traffic...")
+                  except: pass
              continue
         batch_size = min(len(avl), len(pending)); batch = [pending.pop(0) for _ in range(batch_size)]
         tasks = [asyncio.wait_for(check_number(batch[i], user_clients[avl[i]], avl[i]), timeout=20) for i in range(batch_size)]
@@ -302,102 +319,108 @@ async def msg_handler(event):
 
 @bot.on(events.CallbackQuery)
 async def callback_handler(event):
-    try: await event.answer()
-    except: pass
-    data = event.data; uid = event.sender_id; db = get_db(); admir = get_admin_id()
-    
-    if data.startswith(b"m_"):
-        mode = data.decode().replace("m_", "")
-        if mode.startswith("rcv_"): update_user_stats(uid, receive_mode=mode.replace("rcv_", ""))
-        elif mode.startswith("sh_"): 
-            m_m = {"sh_gr_f": "green_first", "sh_ord": "sort_by_order", "sh_on_gr": "only_green", "sh_on_ud": "only_used"}
-            update_user_stats(uid, show_mode=m_m.get("sh_"+mode.replace("sh_",""), "sort_by_order"))
-        s = get_user_stats(uid); rm = s.get('receive_mode', 'copy'); md = s['show_mode']
-        if "rcv_" in mode: btns = [[Button.inline(f"{'✅ ' if rm=='text' else ''}📝 As Text", b"m_rcv_text")], [Button.inline(f"{'✅ ' if rm=='copy' else ''}📋 As Copy Button", b"m_rcv_copy")], [Button.inline(f"{'✅ ' if rm=='file' else ''}📁 As a File", b"m_rcv_file")]]
-        else: btns = [[Button.inline(f"{'✅ ' if md=='green_first' else ''}🟢 Green First", b"m_sh_gr_f")], [Button.inline(f"{'✅ ' if md=='sort_by_order' else ''}🔢 By Order", b"m_sh_ord")], [Button.inline(f"{'✅ ' if md=='only_green' else ''}✅ Only ✅", b"m_sh_on_gr")], [Button.inline(f"{'✅ ' if md=='only_used' else ''}🔐 Only 🔐", b"m_sh_on_ud")]]
-        return await event.edit("✅ Updated!", buttons=btns)
+    try:
+        data = event.data; uid = event.sender_id; db = get_db(); admir = get_admin_id()
+        await event.answer()
+        
+        if data.startswith(b"m_"):
+            mode = data.decode().replace("m_", "")
+            if mode.startswith("rcv_"): update_user_stats(uid, receive_mode=mode.replace("rcv_", ""))
+            elif mode.startswith("sh_"): 
+                m_m = {"sh_gr_f": "green_first", "sh_ord": "sort_by_order", "sh_on_gr": "only_green", "sh_on_ud": "only_used"}
+                update_user_stats(uid, show_mode=m_m.get("sh_"+mode.replace("sh_",""), "sort_by_order"))
+            s = get_user_stats(uid); rm = s.get('receive_mode', 'copy'); md = s['show_mode']
+            if "rcv_" in mode: btns = [[Button.inline(f"{'✅ ' if rm=='text' else ''}📝 As Text", b"m_rcv_text")], [Button.inline(f"{'✅ ' if rm=='copy' else ''}📋 As Copy Button", b"m_rcv_copy")], [Button.inline(f"{'✅ ' if rm=='file' else ''}📁 As a File", b"m_rcv_file")]]
+            else: btns = [[Button.inline(f"{'✅ ' if md=='green_first' else ''}🟢 Green First", b"m_sh_gr_f")], [Button.inline(f"{'✅ ' if md=='sort_by_order' else ''}🔢 By Order", b"m_sh_ord")], [Button.inline(f"{'✅ ' if md=='only_green' else ''}✅ Only ✅", b"m_sh_on_gr")], [Button.inline(f"{'✅ ' if md=='only_used' else ''}🔐 Only 🔐", b"m_sh_on_ud")]]
+            return await event.edit("✅ Updated!", buttons=btns)
 
-    if uid != admir: return
-    if data == b"adm_main": await show_admin_panel(event, edit=True)
-    elif data == b"adm_settings":
-        btns = [[Button.inline(f"🆔 Admin ID: {get_admin_id()}", b"set_adm_id")], [Button.inline(f"👤 Support: {get_support_id()}", b"set_supp_id")], [Button.inline(f"⚡ Speed (Delay: {get_check_delay()}s)", b"set_speed")], [Button.inline("⬅️ Back", b"adm_main")]]
-        await event.edit("⚙️ **Bot Settings:**", buttons=btns)
-    elif data == b"set_speed":
-        async with bot.conversation(admir, timeout=300) as conv:
-            await conv.send_message("Enter delay in seconds:"); r = await conv.get_response()
-            try: db["config"]["check_delay"] = float(r.text); save_db(db); await conv.send_message("✅ Done!"); await show_admin_panel(event, edit=True)
-            except: pass
-    elif data.startswith(b"set_"):
-        if data == b"set_adm_id":
-             async with bot.conversation(admir, timeout=300) as conv:
-                 await conv.send_message("Enter new Admin ID:"); r = await conv.get_response()
-                 if r.text.isdigit(): db["config"]["admin_id"] = int(r.text); save_db(db); await conv.send_message("✅ Done!"); await show_admin_panel(event, edit=True)
-        elif data == b"set_supp_id":
-             async with bot.conversation(admir, timeout=300) as conv:
-                 await conv.send_message("Enter Support ID (with @):"); r = await conv.get_response()
-                 if r.text.startswith("@"): db["config"]["support_id"] = r.text; save_db(db); await conv.send_message("✅ Done!"); await show_admin_panel(event, edit=True)
-    elif data == b"rc_conf":
-        inf = pending_recharges.pop(admir, None)
-        if inf:
-            u = inf["uid"]; amt = inf["amt"]; update_user_stats(u, points=amt)
-            await event.edit(f"✅ Recharge complete!")
-            try: await bot.send_message(int(u), f"🎉 Balance recharged with {amt} points!")
-            except: pass
-    elif data == b"adm_stats":
-        s_ph = [s['phone'] for s in db.get('sessions', [])]; ok = len([p for p in s_ph if p in user_clients])
-        await event.edit(f"👥 Users: {len(db['users'])}\n📱 Sessions: {len(s_ph)} ({ok} Active)", buttons=[[Button.inline("⬅️ Back", b"adm_main")]])
-    elif data == b"adm_notice":
-        async with bot.conversation(admir, timeout=300) as conv:
-            await conv.send_message("📝 Notice message:"); msg = (await conv.get_response()).text
-            pending_notices[admir] = msg; btns = [[Button.inline("✅ Send", b"nt_send"), Button.inline("❌ Cancel", b"adm_main")]]
-            await conv.send_message(f"📢 Preview:\n\n{msg}", buttons=btns)
-    elif data == b"nt_send":
-        m = pending_notices.pop(admir, None); 
-        if m: 
-            await event.edit("⏳ Sending..."); c = 0
-            for u in db['users']:
-                try: await bot.send_message(u, f"📢 **NOTICE:**\n\n{m}"); c += 1
+        if uid != admir: return
+        if data == b"adm_main": await show_admin_panel(event, edit=True)
+        elif data == b"adm_settings":
+            btns = [[Button.inline(f"🆔 Admin ID: {get_admin_id()}", b"set_adm_id")], [Button.inline(f"👤 Support: {get_support_id()}", b"set_supp_id")], [Button.inline(f"⚡ Speed (Delay: {get_check_delay()}s)", b"set_speed")], [Button.inline("⬅️ Back", b"adm_main")]]
+            await event.edit("⚙️ **Bot Settings:**", buttons=btns)
+        elif data == b"set_speed":
+            async with bot.conversation(admir, timeout=300) as conv:
+                await conv.send_message("Enter delay in seconds:"); r = await conv.get_response()
+                try: db["config"]["check_delay"] = float(r.text); save_db(db); await conv.send_message("✅ Done!"); await show_admin_panel(event, edit=True)
                 except: pass
-            await event.edit(f"✅ Sent to {c} users!", buttons=[[Button.inline("⬅️ Back", b"adm_main")]])
-    elif data == b"adm_list_sess":
-        btns = [[Button.inline(f"{'🟢' if s['phone'] in user_clients else '🔴'} {s['phone']}", f"si_{s['phone']}".encode())] for s in db.get('sessions', [])]
-        btns.append([Button.inline("⬅️ Back", b"adm_main")]); await event.edit("Sessions:", buttons=btns)
-    elif data.startswith(b"si_"):
-        p = data.decode().split("_")[1]; st_s = db.get("session_stats", {}).get(p, {"tested": 0})
-        btns = [[Button.inline("🔓 Logout", f"lo_{p}".encode())], [Button.inline("⬅️ Back", b"adm_list_sess")]]
-        await event.edit(f"📱 {p}\nTested: {st_s['tested']}", buttons=btns)
-    elif data.startswith(b"lo_"):
-        p = data.decode().split("_")[1]; db["sessions"] = [s for s in db["sessions"] if s["phone"] != p]
-        if p in user_clients: cs = user_clients.pop(p); await cs.disconnect()
-        save_db(db); await show_admin_panel(event, edit=True)
-    elif data.startswith(b"adm_users_"):
-        pg = int(data.decode().split("_")[2]); usrs = list(db['user_data'].keys()); batch = usrs[pg*20:(pg+1)*20]
-        btns = [[Button.inline(f"👤 {db['user_data'][u].get('name', u)}", f"us_{u}".encode())] for u in batch]
-        btns.append([Button.inline("⬅️ Back", b"adm_main")]); await event.edit("User List:", buttons=btns)
-    elif data.startswith(b"us_"):
-        u = data.decode().split("_")[1]; await admin_u_info(event, u)
-    elif data.startswith(b"uset_"):
-        u, act = data.decode().split("_")[1:3]
-        if act == "pts":
-             async with bot.conversation(admir, timeout=300) as conv:
-                 await conv.send_message(f"💰 Amount for {u}:"); r = await conv.get_response()
-                 if r.text.isdigit(): 
-                     amt = int(r.text); pending_recharges[admir] = {"uid": u, "amt": amt}
-                     btns_c = [[Button.inline("✅ Yes", b"rc_conf"), Button.inline("❌ No", f"us_{u}".encode())]]
-                     await conv.send_message(f"❓ Confirm recharge of **{amt}** points for `{u}`?", buttons=btns_c)
-        elif act == "rst": update_user_stats(u, points=-get_user_stats(u)['points']); await admin_u_info(event, u)
-        elif act == "blk": 
-             if int(u) not in db['blocked']: db['blocked'].append(int(u)); save_db(db); await admin_u_info(event, u)
-        elif act == "unb":
-             db['blocked'] = [i for i in db['blocked'] if i != int(u)]; save_db(db); await admin_u_info(event, u)
-    elif data.startswith(b"adm_blk_list_"):
-        btns = [[Button.inline(f"🔓 Unblock {u}", f"ub_{u}".encode())] for u in db['blocked']]
-        btns.append([Button.inline("⬅️ Back", b"adm_main")]); await event.edit("Blocked Users:", buttons=btns)
-    elif data.startswith(b"ub_"):
-        u = int(data.decode().split("_")[1]); db['blocked'] = [i for i in db['blocked'] if i != u]; save_db(db); await show_admin_panel(event, edit=True)
+        elif data.startswith(b"set_"):
+            if data == b"set_adm_id":
+                 async with bot.conversation(admir, timeout=300) as conv:
+                     await conv.send_message("Enter new Admin ID:"); r = await conv.get_response()
+                     if r.text.isdigit(): db["config"]["admin_id"] = int(r.text); save_db(db); await conv.send_message("✅ Done!"); await show_admin_panel(event, edit=True)
+            elif data == b"set_supp_id":
+                 async with bot.conversation(admir, timeout=300) as conv:
+                     await conv.send_message("Enter Support ID (with @):"); r = await conv.get_response()
+                     if r.text.startswith("@"): db["config"]["support_id"] = r.text; save_db(db); await conv.send_message("✅ Done!"); await show_admin_panel(event, edit=True)
+        elif data == b"rc_conf":
+            inf = pending_recharges.pop(admir, None)
+            if inf:
+                u = inf["uid"]; amt = inf["amt"]; update_user_stats(u, points=amt)
+                try: await event.edit(f"✅ Recharge complete!")
+                except: pass
+                try: await bot.send_message(int(u), f"🎉 Balance recharged with {amt} points!")
+                except: pass
+        elif data == b"adm_stats":
+            s_ph = [s['phone'] for s in db.get('sessions', [])]; ok = len([p for p in s_ph if p in user_clients])
+            await event.edit(f"👥 Users: {len(db['users'])}\n📱 Sessions: {len(s_ph)} ({ok} Active)", buttons=[[Button.inline("⬅️ Back", b"adm_main")]])
+        elif data == b"adm_notice":
+            async with bot.conversation(admir, timeout=300) as conv:
+                await conv.send_message("📝 Notice message:"); msg = (await conv.get_response()).text
+                pending_notices[admir] = msg; btns = [[Button.inline("✅ Send", b"nt_send"), Button.inline("❌ Cancel", b"adm_main")]]
+                await conv.send_message(f"📢 Preview:\n\n{msg}", buttons=btns)
+        elif data == b"nt_send":
+            m = pending_notices.pop(admir, None); 
+            if m: 
+                await event.edit("⏳ Sending..."); c = 0
+                for u in db['users']:
+                    try: await bot.send_message(u, f"📢 **NOTICE:**\n\n{m}"); c += 1
+                    except: pass
+                await event.edit(f"✅ Sent to {c} users!", buttons=[[Button.inline("⬅️ Back", b"adm_main")]])
+        elif data == b"adm_list_sess":
+            btns = [[Button.inline(f"{'🟢' if s['phone'] in user_clients else '🔴'} {s['phone']}", f"si_{s['phone']}".encode())] for s in db.get('sessions', [])]
+            btns.append([Button.inline("⬅️ Back", b"adm_main")]); await event.edit("Sessions:", buttons=btns)
+        elif data.startswith(b"si_"):
+            p = data.decode().split("_")[1]; st_s = db.get("session_stats", {}).get(p, {"tested": 0})
+            btns = [[Button.inline("🔓 Logout", f"lo_{p}".encode())], [Button.inline("⬅️ Back", b"adm_list_sess")]]
+            await event.edit(f"📱 {p}\nTested: {st_s['tested']}", buttons=btns)
+        elif data.startswith(b"lo_"):
+            p = data.decode().split("_")[1]; db["sessions"] = [s for s in db["sessions"] if s["phone"] != p]
+            if p in user_clients: cs = user_clients.pop(p); await cs.disconnect()
+            save_db(db); await show_admin_panel(event, edit=True)
+        elif data.startswith(b"adm_users_"):
+            pg = int(data.decode().split("_")[2]); usrs = list(db['user_data'].keys()); batch = usrs[pg*20:(pg+1)*20]
+            btns = [[Button.inline(f"👤 {db['user_data'][u].get('name', u)}", f"us_{u}".encode())] for u in batch]
+            btns.append([Button.inline("⬅️ Back", b"adm_main")]); await event.edit("User List:", buttons=btns)
+        elif data.startswith(b"us_"):
+            u = data.decode().split("_")[1]; await admin_u_info(event, u)
+        elif data.startswith(b"uset_"):
+            u, act = data.decode().split("_")[1:3]
+            if act == "pts":
+                 async with bot.conversation(admir, timeout=300) as conv:
+                     await conv.send_message(f"💰 Amount for {u}:"); r = await conv.get_response()
+                     if r.text.isdigit(): 
+                         amt = int(r.text); pending_recharges[admir] = {"uid": u, "amt": amt}
+                         btns_c = [[Button.inline("✅ Yes", b"rc_conf"), Button.inline("❌ No", f"us_{u}".encode())]]
+                         await conv.send_message(f"❓ Confirm recharge of **{amt}** points for `{u}`?", buttons=btns_c)
+            elif act == "rst": update_user_stats(u, points=-get_user_stats(u)['points']); await admin_u_info(event, u)
+            elif act == "blk": 
+                 if int(u) not in db['blocked']: db['blocked'].append(int(u)); save_db(db); await admin_u_info(event, u)
+            elif act == "unb":
+                 db['blocked'] = [i for i in db['blocked'] if i != int(u)]; save_db(db); await admin_u_info(event, u)
+        elif data.startswith(b"adm_blk_list_"):
+            btns = [[Button.inline(f"🔓 Unblock {u}", f"ub_{u}".encode())] for u in db['blocked']]
+            btns.append([Button.inline("⬅️ Back", b"adm_main")]); await event.edit("Blocked Users:", buttons=btns)
+        elif data.startswith(b"ub_"):
+            u = int(data.decode().split("_")[1]); db['blocked'] = [i for i in db['blocked'] if i != u]; save_db(db); await show_admin_panel(event, edit=True)
+    except Exception as e:
+        print(f"Error in callback: {e}")
 
 async def main():
-    await bot.start(bot_token=BOT_TOKEN); await init_sessions(); print("Animation & Text Updated!"); await bot.run_until_disconnected()
+    try:
+        await bot.start(bot_token=BOT_TOKEN); await init_sessions(); print("Bot is running!"); await bot.run_until_disconnected()
+    except Exception as e:
+        print(f"Global Error: {e}")
 
 if __name__ == '__main__':
     asyncio.run(main())
