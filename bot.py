@@ -84,34 +84,26 @@ def update_session_stats(phone, tested=1):
 
 async def init_sessions():
     db = get_db()
-    valid_sessions = []
     for sess in db.get("sessions", []):
         phone = sess["phone"]; sid = sess["session_id"]; path = os.path.join(SESSION_DIR, sid)
+        if phone in user_clients: continue
         client = TelegramClient(path, API_ID, API_HASH)
         try:
             await client.connect()
             if not await client.is_user_authorized():
-                print(f"Session {phone} not authorized. Removing.")
-                raise errors.AuthKeyUnregisteredError()
+                print(f"Session {phone} not authorized. Skipping.")
+                await client.disconnect(); continue
                 
-            await client(functions.help.GetConfigRequest()) # Deep check key
+            await client(functions.help.GetConfigRequest())
             user_clients[phone] = client
-            valid_sessions.append(sess)
         except (errors.AuthKeyDuplicatedError, errors.AuthKeyUnregisteredError, errors.AuthKeyInvalidError):
-            print(f"CRITICAL: Session {phone} is DUPLICATED or INVALID. Deleting file...")
+            print(f"Session {phone} is conflicted or invalid. Skipping.")
             try: await client.disconnect()
             except: pass
-            if os.path.exists(path + ".session"): 
-                try: os.remove(path + ".session")
-                except: pass
         except Exception as e:
-            print(f"Session {phone} connection error: {e}")
-            valid_sessions.append(sess)
-            
-    # Update DB with only valid or temporarily failed sessions
-    if len(valid_sessions) != len(db.get("sessions", [])):
-        db["sessions"] = valid_sessions
-        save_db(db)
+            print(f"Session {phone} error: {e}")
+            try: await client.disconnect()
+            except: pass
 
 def normalize_number(phone):
     if not phone: return ""
@@ -200,7 +192,7 @@ async def check_number(phone, client, client_phone):
         if client_phone in user_clients: 
             try: del user_clients[client_phone]
             except: pass
-        return {"phone": phone, "error": True, "wait_time": 0, "client_phone": client_phone, "remove_sess": True}
+        return {"phone": phone, "error": True, "wait_time": 0, "client_phone": client_phone}
     except: return {"phone": phone, "exists": False, "is_ban": False, "btn_text": f"{get_flag(phone)} {phone} ✅              ", "client_phone": client_phone}
 
 # --- Handlers ---
