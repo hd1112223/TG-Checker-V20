@@ -164,27 +164,43 @@ async def admin_u_info(event, u_id):
 
 async def check_number(phone, client, client_phone):
     try:
-        flag = get_flag(phone); 
-        c_contact = types.InputPhoneContact(client_id=random.randint(1, 999999), phone=phone, first_name="Check", last_name=str(time.time())[-4:])
+        flag = get_flag(phone)
+        clean_phone = re.sub(r'\D', '', phone)
+        # client_id should be random to avoid conflicts
+        c_contact = types.InputPhoneContact(client_id=random.randint(100000, 999999), phone=phone, first_name="Check", last_name=str(time.time())[-4:])
         res_imp = await client(functions.contacts.ImportContactsRequest([c_contact]))
+        
         exists = False
         is_ban = False
+        target_u = None
+        
         if res_imp.users:
-            for u_u in res_imp.users:
-                exists = True
-                if getattr(u_u, 'deleted', False):
-                    is_ban = True
-                    exists = False
-                if exists or is_ban: break
+            for u in res_imp.users:
+                u_p = getattr(u, 'phone', None)
+                if u_p:
+                    if u_p in clean_phone or clean_phone in u_p:
+                        target_u = u; break
+                else: 
+                    # Fallback for some sessions
+                    target_u = u; break
             
-            try: await client(functions.contacts.DeleteContactsRequest(id=[u.id for u in res_imp.users]))
-            except: pass
+            if target_u:
+                if getattr(target_u, 'deleted', False):
+                    is_ban = True
+                else:
+                    exists = True
+                
+                # Immediate Contact Cleanup
+                try: await client(functions.contacts.DeleteContactsRequest(id=[target_u.id]))
+                except: pass
         
         update_session_stats(client_phone)
-        # 🔐 for Healthy, ✅ for No Account, ⬛️ for Banned
+        
+        # Correct Icons Logic
         if is_ban: icon = "⬛️"
-        elif exists: icon = "🔐"
-        else: icon = "✅"
+        elif exists: icon = "✅"
+        else: icon = "❌"
+        
         txt_b = f"{flag} {phone} {icon}              "
         return {"phone": phone, "exists": exists, "is_ban": is_ban, "btn_text": txt_b, "client_phone": client_phone}
     except errors.FloodWaitError as e: return {"phone": phone, "error": True, "wait_time": e.seconds, "client_phone": client_phone}
@@ -193,7 +209,7 @@ async def check_number(phone, client, client_phone):
             try: del user_clients[client_phone]
             except: pass
         return {"phone": phone, "error": True, "wait_time": 0, "client_phone": client_phone}
-    except: return {"phone": phone, "exists": False, "is_ban": False, "btn_text": f"{get_flag(phone)} {phone} ✅              ", "client_phone": client_phone}
+    except: return {"phone": phone, "exists": False, "is_ban": False, "btn_text": f"{get_flag(phone)} {phone} ❌              ", "client_phone": client_phone}
 
 # --- Handlers ---
 
