@@ -19,8 +19,9 @@ SESSION_DIR = 'sessions'
 
 if not os.path.exists(SESSION_DIR): os.makedirs(SESSION_DIR)
 
-# Initialize Bot Client
-bot = TelegramClient('bot_ui_session', API_ID, API_HASH)
+# Initialize Bot Client with unique session name to avoid local/repo conflicts
+bot_session_name = f'bot_main_session_{BOT_TOKEN.split(":")[0]}'
+bot = TelegramClient(bot_session_name, API_ID, API_HASH)
 
 # Global Managers
 user_clients = {} 
@@ -93,15 +94,23 @@ async def init_sessions():
         client = TelegramClient(path, API_ID, API_HASH)
         try:
             await client.connect()
-            if await client.is_user_authorized(): 
-                user_clients[phone] = client
-                valid_sessions.append(sess)
-        except errors.AuthKeyDuplicatedError:
-            print(f"Session {phone} invalidated by Telegram (AuthKeyDuplicated). Removing.")
-            if os.path.exists(path + ".session"): os.remove(path + ".session")
+            if not await client.is_user_authorized():
+                print(f"Session {phone} not authorized. Removing.")
+                raise errors.AuthKeyUnregisteredError()
+                
+            await client(functions.help.GetConfigRequest()) # Deep check key
+            user_clients[phone] = client
+            valid_sessions.append(sess)
+        except (errors.AuthKeyDuplicatedError, errors.AuthKeyUnregisteredError, errors.AuthKeyInvalidError):
+            print(f"CRITICAL: Session {phone} is DUPLICATED or INVALID. Deleting file...")
+            try: await client.disconnect()
+            except: pass
+            if os.path.exists(path + ".session"): 
+                try: os.remove(path + ".session")
+                except: pass
         except Exception as e:
-            print(f"Session {phone} failed to connect: {e}")
-            valid_sessions.append(sess) # Keep it, might be temporary network issue
+            print(f"Session {phone} connection error: {e}")
+            valid_sessions.append(sess)
             
     # Update DB with only valid or temporarily failed sessions
     if len(valid_sessions) != len(db.get("sessions", [])):
@@ -191,6 +200,11 @@ async def check_number(phone, client, client_phone):
         txt_b = f"{flag} {phone} {icon}              "
         return {"phone": phone, "exists": exists, "is_ban": is_ban, "btn_text": txt_b, "client_phone": client_phone}
     except errors.FloodWaitError as e: return {"phone": phone, "error": True, "wait_time": e.seconds, "client_phone": client_phone}
+    except errors.AuthKeyDuplicatedError:
+        if client_phone in user_clients: 
+            try: del user_clients[client_phone]
+            except: pass
+        return {"phone": phone, "error": True, "wait_time": 0, "client_phone": client_phone, "remove_sess": True}
     except: return {"phone": phone, "exists": False, "is_ban": False, "btn_text": f"{get_flag(phone)} {phone} ✅              ", "client_phone": client_phone}
 
 # --- Handlers ---
@@ -307,7 +321,13 @@ async def msg_handler(event):
                 if isinstance(r, dict) and not r.get("error"): results.append(r)
                 elif isinstance(r, dict) and r.get("phone"): 
                      pending.insert(0, r["phone"])
-                     if r.get("error"): session_waits[r.get("client_phone")] = now + r.get("wait_time", 10)
+                     if r.get("error") and not r.get("remove_sess"): 
+                          session_waits[r.get("client_phone")] = now + r.get("wait_time", 10)
+                     if r.get("remove_sess"):
+                          # Remove from DB too
+                          db = get_db()
+                          db["sessions"] = [s for s in db["sessions"] if s["phone"] != r.get("client_phone")]
+                          save_db(db)
         except: pass
         try: 
              pct = (len(results) * 10) // len(to_chk); bar = "■" * pct + "□" * (10 - pct)
@@ -436,25 +456,39 @@ async def callback_handler(event):
     except Exception as e:
         print(f"Error in callback: {e}")
 
-bot.error_handlers = [] # Telethon global errors config
 async def global_error_handler(event):
-    if "two different IP addresses" in str(event) or "AuthKeyDuplicatedError" in str(event):
-        print(f"Background session Error Caught: {event}")
+    err = str(event)
+    if "two different IP addresses" in err or "AuthKeyDuplicatedError" in err:
+        print(f"Background session Issue: {err}")
 bot.add_event_handler(global_error_handler, events.Raw)
 
 async def main():
-    try:
-        await bot.start(bot_token=BOT_TOKEN)
-        await init_sessions()
-        print("Bot is running!")
-        await bot.run_until_disconnected()
-    except Exception as e:
-        if "GetDifferenceRequest" in str(e) or "IP addresses" in str(e):
-             print(f"Ignored Background Update Error: {e}")
-             # Restart loop safely
-             await main()
-        else:
-             print(f"Global Error: {e}")
+    while True:
+        try:
+            if not bot.is_connected():
+                await bot.start(bot_token=BOT_TOKEN)
+            await init_sessions()
+            print("--- Bot Is Now Online (Cloud Stable Mode) ---")
+            await bot.run_until_disconnected()
+        except Exception as e:
+            err_msg = str(e).lower()
+            if any(x in err_msg for x in ["ip addresses", "authkeyduplicated", "authorization key", "getconfigrequest"]):
+                 print(f"CLOUD CONFLICT DETECTED: {e}")
+                 try:
+                     await bot.disconnect()
+                     # Try to remove the main bot session file
+                     for f in os.listdir("."):
+                         if f.startswith(bot_session_name) and f.endswith(".session"):
+                             os.remove(f)
+                             print(f"Fixed: Removed conflicted bot session file {f}")
+                 except: pass
+                 await asyncio.sleep(2)
+            elif "getdifferencerequest" in err_msg or "update" in err_msg:
+                 print(f"Background Sync (Non-Critical): {e}")
+                 await asyncio.sleep(2)
+            else:
+                 print(f"Global Error: {e}")
+                 await asyncio.sleep(5)
 
 if __name__ == '__main__':
     asyncio.run(main())
