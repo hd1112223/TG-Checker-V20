@@ -87,13 +87,26 @@ def update_session_stats(phone, tested=1):
 
 async def init_sessions():
     db = get_db()
+    valid_sessions = []
     for sess in db.get("sessions", []):
         phone = sess["phone"]; sid = sess["session_id"]; path = os.path.join(SESSION_DIR, sid)
         client = TelegramClient(path, API_ID, API_HASH)
         try:
             await client.connect()
-            if await client.is_user_authorized(): user_clients[phone] = client
-        except: pass
+            if await client.is_user_authorized(): 
+                user_clients[phone] = client
+                valid_sessions.append(sess)
+        except errors.AuthKeyDuplicatedError:
+            print(f"Session {phone} invalidated by Telegram (AuthKeyDuplicated). Removing.")
+            if os.path.exists(path + ".session"): os.remove(path + ".session")
+        except Exception as e:
+            print(f"Session {phone} failed to connect: {e}")
+            valid_sessions.append(sess) # Keep it, might be temporary network issue
+            
+    # Update DB with only valid or temporarily failed sessions
+    if len(valid_sessions) != len(db.get("sessions", [])):
+        db["sessions"] = valid_sessions
+        save_db(db)
 
 def normalize_number(phone):
     if not phone: return ""
@@ -423,11 +436,25 @@ async def callback_handler(event):
     except Exception as e:
         print(f"Error in callback: {e}")
 
+bot.error_handlers = [] # Telethon global errors config
+async def global_error_handler(event):
+    if "two different IP addresses" in str(event) or "AuthKeyDuplicatedError" in str(event):
+        print(f"Background session Error Caught: {event}")
+bot.add_event_handler(global_error_handler, events.Raw)
+
 async def main():
     try:
-        await bot.start(bot_token=BOT_TOKEN); await init_sessions(); print("Bot is running!"); await bot.run_until_disconnected()
+        await bot.start(bot_token=BOT_TOKEN)
+        await init_sessions()
+        print("Bot is running!")
+        await bot.run_until_disconnected()
     except Exception as e:
-        print(f"Global Error: {e}")
+        if "GetDifferenceRequest" in str(e) or "IP addresses" in str(e):
+             print(f"Ignored Background Update Error: {e}")
+             # Restart loop safely
+             await main()
+        else:
+             print(f"Global Error: {e}")
 
 if __name__ == '__main__':
     asyncio.run(main())
