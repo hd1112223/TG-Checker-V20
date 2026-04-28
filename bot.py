@@ -6,6 +6,7 @@ import telethon.sync
 import requests
 import random
 import time
+import traceback
 from telethon import TelegramClient, events, functions, types, errors, Button
 
 # --- Credentials ---
@@ -29,33 +30,28 @@ session_waits = {}
 users_in_conversation = set()
 pending_notices = {}
 pending_recharges = {}
+processed_msgs = set() # To prevent double processing
+SERVER_TAG = " [Cloud] 🌐" if os.environ.get("RAILWAY_ENVIRONMENT") else " [Local] 💻"
+
+db_lock = asyncio.Lock()
 
 def get_db():
-    default_db = {
-        "users": [], 
-        "blocked": [], 
-        "sessions": [], 
-        "user_data": {}, 
-        "session_stats": {}, 
-        "config": {"admin_id": DEFAULT_ADMIN, "support_id": "@rikton16", "check_delay": 0.5}
-    }
-    if not os.path.exists(DB_FILE):
-        return default_db
+    default_db = {"users": [], "blocked": [], "sessions": [], "user_data": {}, "session_stats": {}, "config": {"admin_id": DEFAULT_ADMIN, "support_id": "@rikton16", "check_delay": 0.5}}
+    if not os.path.exists(DB_FILE): return default_db
     try:
         with open(DB_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            # Ensure essential keys exist
             if not isinstance(data, dict): return default_db
-            if "session_stats" not in data: data["session_stats"] = {}
-            if "user_data" not in data: data["user_data"] = {}
-            if "config" not in data: data["config"] = default_db["config"]
-            if "check_delay" not in data["config"]: data["config"]["check_delay"] = 0.5
+            for k in default_db:
+                if k not in data: data[k] = default_db[k]
             return data
-    except:
-        return default_db
+    except: return default_db
 
 def save_db(data):
-    with open(DB_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e: print(f"DB Save Error: {e}")
 
 def get_admin_id(): return get_db().get("config", {}).get("admin_id", DEFAULT_ADMIN)
 def get_support_id(): return get_db().get("config", {}).get("support_id", "@rikton16")
@@ -245,6 +241,10 @@ async def login_cmd(event):
 @bot.on(events.NewMessage(incoming=True))
 async def msg_handler(event):
     if not event.is_private or event.sender_id in users_in_conversation: return
+    if event.id in processed_msgs: return
+    processed_msgs.add(event.id)
+    if len(processed_msgs) > 1000: processed_msgs.pop() # Keep it small
+    
     u_id = event.sender_id; db = get_db(); text = event.text
     if u_id in db['blocked']: 
          return await event.reply(f"❌ You are currently blocked. Please contact the admin: {get_support_id()}")
@@ -344,7 +344,7 @@ async def msg_handler(event):
     elif md == "green_first": final = sorted(results, key=lambda x: x["exists"])
     
     c_ok = len([r for r in results if r["exists"]]); c_no = len([r for r in results if not r["exists"] and not r["is_ban"]]); c_bn = len([r for r in results if r["is_ban"]])
-    res_h = (f"অ্যাকাউন্ট থাকলে: 🔐 | না থাকলে: ✅ | ব্যান: ⬛️\n⏱️ Time Taken: {duration}s\n📊 Results :\n🔐:{c_ok:02}\n✅:{c_no:02}\n⬛️:{c_bn:02}")
+    res_h = (f"অ্যাকাউন্ট থাকলে: 🔐 | না থাকলে: ✅ | ব্যান: ⬛️\n⏱️ Time Taken: {duration}s\n📊 Results :{SERVER_TAG}\n🔐:{c_ok:02}\n✅:{c_no:02}\n⬛️:{c_bn:02}")
     if rm == "copy":
         for i in range(0, len(final), 100):
             pld = {"chat_id": event.chat_id, "text": res_h, "reply_markup": {"inline_keyboard": [[{"text": r["btn_text"], "copy_text": {"text": r["phone"]}}] for r in final[i:i+100]]}}
@@ -453,8 +453,9 @@ async def callback_handler(event):
             btns.append([Button.inline("⬅️ Back", b"adm_main")]); await event.edit("Blocked Users:", buttons=btns)
         elif data.startswith(b"ub_"):
             u = int(data.decode().split("_")[1]); db['blocked'] = [i for i in db['blocked'] if i != u]; save_db(db); await show_admin_panel(event, edit=True)
-    except Exception as e:
-        print(f"Error in callback: {e}")
+    except errors.MessageNotModifiedError: pass
+    except Exception:
+        print(f"Callback Error Traceback:\n{traceback.format_exc()}")
 
 async def global_error_handler(event):
     err = str(event)
