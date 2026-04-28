@@ -166,50 +166,51 @@ async def check_number(phone, client, client_phone):
     try:
         flag = get_flag(phone)
         clean_phone = re.sub(r'\D', '', phone)
-        # client_id should be random to avoid conflicts
         c_contact = types.InputPhoneContact(client_id=random.randint(100000, 999999), phone=phone, first_name="Check", last_name=str(time.time())[-4:])
+        
+        # Performance mode: Only check if authorized
+        if not await client.is_user_authorized(): return {"phone": phone, "error": True, "wait_time": 0, "client_phone": client_phone}
+        
         res_imp = await client(functions.contacts.ImportContactsRequest([c_contact]))
         
         exists = False
         is_ban = False
         target_u = None
         
+        # If imported list is empty and users list is empty, but retry_contacts is NOT empty, it's a rate limit
+        if not res_imp.users and not res_imp.imported and res_imp.retry_contacts:
+            return {"phone": phone, "error": True, "wait_time": 60, "client_phone": client_phone}
+
         if res_imp.users:
             for u in res_imp.users:
                 u_p = getattr(u, 'phone', None)
                 if u_p:
                     if u_p in clean_phone or clean_phone in u_p:
                         target_u = u; break
-                else: 
-                    # Fallback for some sessions
-                    target_u = u; break
+                else: target_u = u; break
             
             if target_u:
-                if getattr(target_u, 'deleted', False):
-                    is_ban = True
-                else:
-                    exists = True
-                
-                # Immediate Contact Cleanup
+                if getattr(target_u, 'deleted', False): is_ban = True
+                else: exists = True
                 try: await client(functions.contacts.DeleteContactsRequest(id=[target_u.id]))
                 except: pass
         
         update_session_stats(client_phone)
         
-        # Correct Icons Logic
+        # Mapping as requested by USER: Account=🔐, No Account=✅, Banned=⬛️
         if is_ban: icon = "⬛️"
-        elif exists: icon = "✅"
-        else: icon = "❌"
+        elif exists: icon = "🔐"
+        else: icon = "✅"
         
         txt_b = f"{flag} {phone} {icon}              "
         return {"phone": phone, "exists": exists, "is_ban": is_ban, "btn_text": txt_b, "client_phone": client_phone}
     except errors.FloodWaitError as e: return {"phone": phone, "error": True, "wait_time": e.seconds, "client_phone": client_phone}
-    except errors.AuthKeyDuplicatedError:
+    except (errors.AuthKeyDuplicatedError, errors.AuthKeyUnregisteredError):
         if client_phone in user_clients: 
             try: del user_clients[client_phone]
             except: pass
         return {"phone": phone, "error": True, "wait_time": 0, "client_phone": client_phone}
-    except: return {"phone": phone, "exists": False, "is_ban": False, "btn_text": f"{get_flag(phone)} {phone} ❌              ", "client_phone": client_phone}
+    except: return {"phone": phone, "exists": False, "is_ban": False, "btn_text": f"{get_flag(phone)} {phone} ✅              ", "client_phone": client_phone}
 
 # --- Handlers ---
 
