@@ -6,7 +6,6 @@ import telethon.sync
 import requests
 import random
 import time
-import traceback
 from telethon import TelegramClient, events, functions, types, errors, Button
 
 # --- Credentials ---
@@ -33,25 +32,32 @@ pending_recharges = {}
 processed_msgs = set() # To prevent double processing
 SERVER_TAG = " [Cloud] 🌐" if os.environ.get("RAILWAY_ENVIRONMENT") else " [Local] 💻"
 
-db_lock = asyncio.Lock()
-
 def get_db():
-    default_db = {"users": [], "blocked": [], "sessions": [], "user_data": {}, "session_stats": {}, "config": {"admin_id": DEFAULT_ADMIN, "support_id": "@rikton16", "check_delay": 0.5}}
-    if not os.path.exists(DB_FILE): return default_db
+    default_db = {
+        "users": [], 
+        "blocked": [], 
+        "sessions": [], 
+        "user_data": {}, 
+        "session_stats": {}, 
+        "config": {"admin_id": DEFAULT_ADMIN, "support_id": "@rikton16", "check_delay": 0.5}
+    }
+    if not os.path.exists(DB_FILE):
+        return default_db
     try:
         with open(DB_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
+            # Ensure essential keys exist
             if not isinstance(data, dict): return default_db
-            for k in default_db:
-                if k not in data: data[k] = default_db[k]
+            if "session_stats" not in data: data["session_stats"] = {}
+            if "user_data" not in data: data["user_data"] = {}
+            if "config" not in data: data["config"] = default_db["config"]
+            if "check_delay" not in data["config"]: data["config"]["check_delay"] = 0.5
             return data
-    except: return default_db
+    except:
+        return default_db
 
 def save_db(data):
-    try:
-        with open(DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e: print(f"DB Save Error: {e}")
+    with open(DB_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=2)
 
 def get_admin_id(): return get_db().get("config", {}).get("admin_id", DEFAULT_ADMIN)
 def get_support_id(): return get_db().get("config", {}).get("support_id", "@rikton16")
@@ -84,26 +90,34 @@ def update_session_stats(phone, tested=1):
 
 async def init_sessions():
     db = get_db()
+    valid_sessions = []
     for sess in db.get("sessions", []):
         phone = sess["phone"]; sid = sess["session_id"]; path = os.path.join(SESSION_DIR, sid)
-        if phone in user_clients: continue
         client = TelegramClient(path, API_ID, API_HASH)
         try:
             await client.connect()
             if not await client.is_user_authorized():
-                print(f"Session {phone} not authorized. Skipping.")
-                await client.disconnect(); continue
+                print(f"Session {phone} not authorized. Removing.")
+                raise errors.AuthKeyUnregisteredError()
                 
-            await client(functions.help.GetConfigRequest())
+            await client(functions.help.GetConfigRequest()) # Deep check key
             user_clients[phone] = client
+            valid_sessions.append(sess)
         except (errors.AuthKeyDuplicatedError, errors.AuthKeyUnregisteredError, errors.AuthKeyInvalidError):
-            print(f"Session {phone} is conflicted or invalid. Skipping.")
+            print(f"CRITICAL: Session {phone} is DUPLICATED or INVALID. Deleting file...")
             try: await client.disconnect()
             except: pass
+            if os.path.exists(path + ".session"): 
+                try: os.remove(path + ".session")
+                except: pass
         except Exception as e:
-            print(f"Session {phone} error: {e}")
-            try: await client.disconnect()
-            except: pass
+            print(f"Session {phone} connection error: {e}")
+            valid_sessions.append(sess)
+            
+    # Update DB with only valid or temporarily failed sessions
+    if len(valid_sessions) != len(db.get("sessions", [])):
+        db["sessions"] = valid_sessions
+        save_db(db)
 
 def normalize_number(phone):
     if not phone: return ""
@@ -192,7 +206,7 @@ async def check_number(phone, client, client_phone):
         if client_phone in user_clients: 
             try: del user_clients[client_phone]
             except: pass
-        return {"phone": phone, "error": True, "wait_time": 0, "client_phone": client_phone}
+        return {"phone": phone, "error": True, "wait_time": 0, "client_phone": client_phone, "remove_sess": True}
     except: return {"phone": phone, "exists": False, "is_ban": False, "btn_text": f"{get_flag(phone)} {phone} ✅              ", "client_phone": client_phone}
 
 # --- Handlers ---
@@ -445,9 +459,8 @@ async def callback_handler(event):
             btns.append([Button.inline("⬅️ Back", b"adm_main")]); await event.edit("Blocked Users:", buttons=btns)
         elif data.startswith(b"ub_"):
             u = int(data.decode().split("_")[1]); db['blocked'] = [i for i in db['blocked'] if i != u]; save_db(db); await show_admin_panel(event, edit=True)
-    except errors.MessageNotModifiedError: pass
-    except Exception:
-        print(f"Callback Error Traceback:\n{traceback.format_exc()}")
+    except Exception as e:
+        print(f"Error in callback: {e}")
 
 async def global_error_handler(event):
     err = str(event)
